@@ -8,7 +8,9 @@
   }
   canvas, body {
     touch-action: none;
+    -webkit-user-select: none;
     user-select: none;
+    -webkit-touch-callout: none;
   }
   canvas {
     image-rendering: pixelated;   /* canvas has no CSS size, so a hi-DPR screen upscales the bitmap - keep that upscale hard-edged, not the browser's default blur */
