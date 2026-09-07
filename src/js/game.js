@@ -30,8 +30,18 @@ const NORMALIZE_DIAGONAL = Math.cos(Math.PI / 4);
 
 const HERO_W = 28;                             // collision AABB + drill radius (hero.w/2); the unicorn sprite is drawn rigidly around this, a few px of leg/horn spill is fine
 const HERO_H = 28;
-const UNICORN_ACCENT = '#a24bd6';             // horn + tail; everything else white
-const LEG_WIGGLE = 0.35;                       // radians of leg-phase advance per world px travelled - gait speeds up with momentum (see moveHero, hero.legPhase)
+const TAIL_WIGGLE_RATE = 0.35;                 // radians of tail-phase advance per world px travelled - wiggle speeds up with momentum (see moveHero, hero.tailPhase)
+// body+tail drag behind the head on a turn: a damped spring (hero.bodyLagAngle/
+// bodyLagVel) chases a target proportional to the head's current turn rate, same
+// lagged-velocity-into-a-spring shape as the camera's CAMERA_LOOKAHEAD (see
+// followCamera) - a sharp turn throws the body out, then it reels back in.
+const BODY_LAG_STIFFNESS = 18;   // omega, rad/s
+const BODY_LAG_DAMPING = 0.6;    // zeta. <1 so the reel-in overshoots/oscillates a touch - reads as "dragged", not just smoothed
+const BODY_LAG_LOOKAHEAD = 0.15; // seconds; how much of the head's turn rate becomes the lag target
+const BODY_LAG_MAX = 30 * Math.PI / 180; // clamp so a snap-turn can't fold the body past a believable swing
+// title hop only (see drawHeroJump): body+tail are just held bent by a fixed
+// angle for the whole hop - no physics, no wiggling, plain and clearly visible.
+const JUMP_BEND = 45 * Math.PI / 180;
 // how fast the drill rotates toward its 8-direction steering target
 // (radians/sec). Finite so the heading eases into the new direction rather
 // than snapping to one of 8 discrete angles - 4*PI = a full 180 in ~0.25s,
@@ -254,7 +264,10 @@ hero = {
   velX: 0,
   velY: 0,
   momentum: MOMENTUM.initial,
-  legPhase: 0,                          // render-only: advanced by distance travelled in moveHero(), drives the leg wiggle
+  tailPhase: 0,                         // render-only: advanced by distance travelled in moveHero(), drives the tail wiggle
+  prevAngle: Math.PI / 2,               // render-only: last frame's angle, so moveHero() can measure turn rate
+  bodyLagAngle: 0,                      // render-only: body+tail's damped-spring rotation offset off the head, see moveHero
+  bodyLagVel: 0,                        // render-only: angular velocity of bodyLagAngle's spring
 };
 heroWentDeep = false;
 depth = 0;
@@ -437,7 +450,7 @@ function renderHud() {
 const ATLAS = {};
 const FRAME_DURATION = 0.1; // duration of 1 animation frame, in seconds
 let tileset;   // characters sprite, embedded as a base64 encoded dataurl by build script
-let sprites;   // 2 frames, 28x28 each: unicorn (unused so far - see TODO), Iris (title screen only)
+let sprites;   // 2 frames, 28x28 each: unicorn (title/highscore idle pose), Iris (title screen only)
 
 // LOOP VARIABLES
 
@@ -496,7 +509,7 @@ function seatSpawn() {
 
 // a fresh hero at the spawn pose - shared by startGame() (drops it into
 // GAME_SCREEN) and goTitle() (drops it back onto the title backdrop), so
-// neither leaves the other's leftover angle/momentum/legPhase lying around.
+// neither leaves the other's leftover angle/momentum/tailPhase/bodyLag lying around.
 function newHero() {
   return {
     x: CAMERA_WIDTH - HERO_W / 2,    // buffer centre (buffer is 2x CAMERA_WIDTH)
@@ -507,7 +520,10 @@ function newHero() {
     velX: 0,
     velY: 0,
     momentum: MOMENTUM.initial,
-    legPhase: 0,
+    tailPhase: 0,
+    prevAngle: Math.PI / 2,
+    bodyLagAngle: 0,
+    bodyLagVel: 0,
   };
 }
 
@@ -775,11 +791,11 @@ function titleMenuLayout() {
 
 // Title-screen unicorn: rests offset right of hero's true buffer position
 // (hero.x/y stay authoritative for the camera/terrain the whole time - see
-// drawHero's offsetX/Y params - so a resize mid-hop just re-seats the real
-// spawn under her and the cosmetic offset keeps ticking) until Start fires,
-// then hops the offset back to 0 along a semicircle and hands off to
-// startGame(). RX/RY are separate (not one shared radius) so "slightly
-// offset" and "jump in the air" can be tuned independently.
+// drawUnicornSprite's offsetX/Y params - so a resize mid-hop just re-seats
+// the real spawn under her and the cosmetic offset keeps ticking) until
+// Start fires, then hops the offset back to 0 along a semicircle and hands
+// off to startGame(). RX/RY are separate (not one shared radius) so
+// "slightly offset" and "jump in the air" can be tuned independently.
 const TITLE_JUMP_RX = 60;
 const TITLE_JUMP_RY = 100;
 const TITLE_JUMP_DURATION = 0.5;
@@ -804,14 +820,19 @@ function titleJumpPose() {
     // bubble - see titleBubbleLayout) and hops left into position.
     x: TITLE_JUMP_RX - TITLE_JUMP_RX * Math.cos(theta),
     y: -TITLE_JUMP_RY * Math.sin(theta),
-    // 0 (facing left, standing on the surface - toward Iris/her bubble and
-    // the direction of the hop, since this is drawn with drawHeroIdle's
-    // mirrored geometry) at rest -> -PI/2 (drilling pose, mirrored) on
-    // landing - a pixel-for-pixel match to the fresh hero startGame() builds
-    // at its initial PI/2 (that's drawHero, Y-mirrored the other way): the
-    // two mirrors agree at exactly the PI/2 gap between these angles, so the
-    // handoff frame is truly continuous, not just "both point down".
+    // 0 (upright) at rest -> -PI/2 (nose down, mid-dive) on landing, purely
+    // cosmetic - see drawUnicornSprite.
     angle: -t * Math.PI / 2,
+    // drawHero's own convention (0 = facing right, PI/2 = facing down - see
+    // hero.angle) rather than drawUnicornSprite's: -PI/2 (facing up) at rest,
+    // sweeping the LONG way round (through 0/-PI rather than climbing
+    // straight to PI/2) so it reads as a front-flip, not a backflip - lands
+    // on -3PI/2, same on-screen orientation as PI/2 (rotation is mod 2PI)
+    // and so still exactly hero.angle's value the instant GAME_SCREEN takes
+    // over - the hop still hands off to real gameplay rendering with no snap.
+    // Used while titleJumping (the ragdoll takes over from the static sprite
+    // for the hop - see render()'s TITLE_SCREEN case).
+    drillAngle: -Math.PI / 2 - t * Math.PI,
   };
 }
 
@@ -906,8 +927,8 @@ function selectRow(row) {
 // the drill sitting wherever it stalled/surfaced. titleJumpT is reset to 0
 // too: it was left at 1 (jump complete) from the Start press that began this
 // run and was never wound back, so titleJumpPose() was landing on its t=1
-// pose (angle PI/2, no offset - the unicorn drawn facing straight down right
-// on top of the just-dug hole) instead of the t=0 resting pose.
+// pose (no offset - the unicorn drawn right on top of the just-dug hole)
+// instead of the t=0 resting pose.
 // titleArmed=false for the same reason goHighscores resets
 // highscoreReady - a key/tap still down from picking this item mustn't
 // instantly fire whatever title-menu item the chevron happens to rest on.
@@ -1013,9 +1034,9 @@ function titleBubbleLayout() {
 }
 
 // Iris herself - a static 28x28 sprite (right frame of sprites.webp; the left
-// frame is the player unicorn, not used here - the title/end-screen unicorn
-// stays the animated vector drawHero()). Feet on the surface line, centred
-// under the bubble's text column so it reads as her speaking it.
+// frame is the title/highscore-screen idle unicorn - see drawUnicornSprite).
+// Feet on the surface line, centred under the bubble's text column so it
+// reads as her speaking it.
 //
 // She has to survive the TITLE_SCREEN -> GAME_SCREEN handoff standing exactly
 // where she was (this is where the player left her, watching from the
@@ -1028,15 +1049,19 @@ function titleBubbleLayout() {
 // and stops updating it.
 let irisWorldX;
 let irisGroundOffset = 0;   // buffer-space px, <=0 - lifts her off the ground line while riding the rainbow's arc (see updateIrisRide); 0 whenever she's just standing/walking
-const SPRITE_SIZE = 28;
+const SPRITE_SIZE = 28;    // title-screen unicorn frame (0,0) - still 28x28, square
 const IRIS_SPRITE_X = 28;
+const IRIS_W = 22;         // Iris's frame is narrower than the unicorn's - (28,0)-(50,28)
+const IRIS_H = 28;
 const IRIS_SCALE = 2;
+const UNICORN_SPRITE_X = 0;
+const UNICORN_SCALE = 2;   // matches IRIS_SCALE so both title-screen characters read at the same size
 function seatIris(bubbleTextX) {
   irisWorldX = cameraX + bubbleTextX + mapOffsetX;   // screen -> buffer (+cameraX) -> world (+mapOffsetX)
 }
 function drawIris() {
-  const w = SPRITE_SIZE * IRIS_SCALE, h = SPRITE_SIZE * IRIS_SCALE;
-  BUFFER_CTX.drawImage(sprites, IRIS_SPRITE_X, 0, SPRITE_SIZE, SPRITE_SIZE, irisWorldX - mapOffsetX - w / 2, SURFACE_Y - mapOffset - h + irisGroundOffset, w, h);
+  const w = IRIS_W * IRIS_SCALE, h = IRIS_H * IRIS_SCALE;
+  BUFFER_CTX.drawImage(sprites, IRIS_SPRITE_X, 0, IRIS_W, IRIS_H, irisWorldX - mapOffsetX - w / 2, SURFACE_Y - mapOffset - h + irisGroundOffset, w, h);
 }
 
 // end-of-run sequence, two phases chained end to end: (1) walk from wherever
@@ -1276,6 +1301,25 @@ function currentDrag() {
   return MOMENTUM.entropy + (DUG.has(cellKey(ex, ey)) ? MOMENTUM.tunnelDrag : MATERIAL_DRAG[sampleMaterial(ex, ey)]);
 }
 
+// body-lag spring (real gameplay turns only - see drawHero's header for why
+// the title hop uses a hardcoded curve instead): target is hero.angle's turn
+// rate looking BODY_LAG_LOOKAHEAD seconds ahead, negated (the body trails
+// behind the turn, it doesn't lead it) and clamped to BODY_LAG_MAX.
+// Fixed-substepped like centerCameraOn(), for the same reason - stable and
+// frame-rate independent even after a hitch.
+function updateBodyLag() {
+  const dAngle = Math.atan2(Math.sin(hero.angle - hero.prevAngle), Math.cos(hero.angle - hero.prevAngle));
+  const angleVel = elapsedTime > 0 ? dAngle / elapsedTime : 0;
+  hero.prevAngle = hero.angle;
+  const target = clamp(-angleVel * BODY_LAG_LOOKAHEAD, -BODY_LAG_MAX, BODY_LAG_MAX);
+  const k = BODY_LAG_STIFFNESS, z = BODY_LAG_DAMPING;
+  for (let rem = Math.min(elapsedTime, 0.1); rem > 0; rem -= 1 / 120) {
+    const h = Math.min(1 / 120, rem);
+    hero.bodyLagVel += (k * k * (target - hero.bodyLagAngle) - 2 * z * k * hero.bodyLagVel) * h;
+    hero.bodyLagAngle += hero.bodyLagVel * h;
+  }
+}
+
 function moveHero() {
   // forward thrust along hero.angle at a speed that is finite, decaying
   // momentum - no throttle, steering only (see processInputs). Drag comes
@@ -1295,7 +1339,8 @@ function moveHero() {
   const moved = hero.momentum * elapsedTime;
   hero.x += hero.velX * moved;
   hero.y += hero.velY * moved;
-  hero.legPhase += moved * LEG_WIGGLE;   // gait cadence rides travel distance -> speed-proportional and pause-safe (no wall-clock term)
+  hero.tailPhase += moved * TAIL_WIGGLE_RATE;   // wiggle cadence rides travel distance -> speed-proportional and pause-safe (no wall-clock term)
+  updateBodyLag();
   // no horizontal clamp - the map is unbounded left/right; followCamera()
   // pages the buffer under the drill wherever it roams.
   depth = Math.max(0, Math.round(hero.y + hero.h - SURFACE_Y + mapOffset));
@@ -1398,7 +1443,7 @@ function endGame(resurfaced) {
   // run (dust===0, caught above) leaves her wherever GAME_SCREEN left her.
   if (dust) {
     irisArc = rainbowRideArc();
-    walkIrisTo(irisArc.leftX - SPRITE_SIZE * IRIS_SCALE / 2);
+    walkIrisTo(irisArc.leftX - IRIS_W * IRIS_SCALE / 2);
   }
   rewound = true;
   let pathLen = 0;
@@ -1835,8 +1880,12 @@ function render() {
       clearBuffer();
       renderDust();   // the underground dust patches near the spawn column - what Iris's bubble is asking for
       {
+        // static sprite at rest; drawHeroJump() takes over for the hop
+        // itself, aimed at hero.angle=PI/2 by landing - see titleJumpPose's
+        // drillAngle.
         const pose = titleJumpPose();
-        drawHeroIdle(pose.x, pose.y, pose.angle);
+        if (titleJumping) drawHeroJump(pose.x, pose.y, pose.drillAngle);
+        else drawUnicornSprite(pose.x, pose.y, pose.angle);
       }
       // pinned near the top (not vertically centred) to leave the surface -
       // where the unicorn/Iris/speech-bubble framing will sit - clear below
@@ -1916,7 +1965,7 @@ function render() {
       renderDust();
       {
         const pose = titleJumpPose();
-        drawHeroIdle(pose.x, pose.y, pose.angle);
+        drawUnicornSprite(pose.x, pose.y, pose.angle);
       }
       renderText('Highscores', CAMERA_WIDTH / 2, HUD_LINE, ALIGN_CENTER, HUD_SCALE * 2);
       {
@@ -2170,107 +2219,99 @@ function renderParticles() {
   }
 };
 
-// stylized unicorn drilling head-first along hero.angle - rects + a triangle
-// horn, drawn rigidly (no rag-doll yet). All white but the purple horn/tail.
-// The whole figure corkscrews with the heading (climbing = upside down, by
-// design); collision stays the plain HERO_W/H AABB, a few px of spill is fine.
-// offsetX/Y (buffer-space px) and angle default to hero's own state - the
-// title screen's resting/hopping unicorn is the only caller that overrides
-// them (see titleJumpPose()); every other call site draws hero exactly where
-// it is.
+// three sprite pieces (head/body/tail - no legs in this art) laid out in the
+// sheet's own local coords as a rigid, already-assembled "unicorn drilling
+// left": head leftmost, tail trailing right. head-to-body/body-to-tail are
+// named joints: head-to-body is rigid and doubles as the whole ragdoll's
+// pivot; body-to-tail is where the tail wiggle (see drawHero) rotates about.
+// sx/sy = where each piece lives in sprites.webp; dx/dy = where it's placed
+// in the assembled ragdoll's own local layout (these are two different
+// coordinate spaces - dx/dy is NOT sx/sy, they only coincide for the head).
+const DRILL_HEAD = { sx: 0, sy: 0, dx: 0, dy: 0, w: 16, h: 16 };
+const DRILL_BODY = { sx: 50, sy: 0, dx: 16, dy: 2, w: 17, h: 17 };
+const DRILL_TAIL = { sx: 50, sy: 17, dx: 31, dy: 8, w: 8, h: 5 };
+const DRILL_JOINT = { x: 16, y: 10 };   // head-to-body anchor, in the dx/dy layout space - doubles as the whole ragdoll's rotation pivot
+const DRILL_TAIL_JOINT = { x: 31, y: 10 };   // body-to-tail anchor, in the dx/dy layout space - the tail wiggle pivot
+const DRILL_SCALE = 2;
+const TAIL_WIGGLE_MAX = 15 * Math.PI / 180;   // tail swings this far each way off rigid, see hero.tailPhase
+
+// unicorn drilling head-first along hero.angle; the head is rigid (it's the
+// horn/dig-probe direction, must track hero.angle exactly), body+tail hang
+// off it with some free play - a damped spring (hero.bodyLagAngle, set in
+// moveHero) rotates them about DRILL_JOINT, dragging behind on a turn; the
+// tail then wiggles on TOP of that about DRILL_TAIL_JOINT, so the two
+// compound (head -> body drags -> tail wiggles), reading as one connected
+// chain. collision stays the plain HERO_W/H AABB, a few px of spill is fine.
+// offsetX/Y (buffer-space px) and angle default to hero's own state - every
+// call site (GAME_SCREEN, the rewind fallback) currently draws hero exactly
+// where it is. TITLE_SCREEN's hop uses the separate drawHeroJump() instead
+// (see its header for why).
 //
-// Built with every local y negated (legs/tail/body/head/horn all on the
-// mirror-image side of the x-axis) so the horn stays on local +x - hero.angle
-// is the real drill heading (velX=cos, velY=sin off it - see moveHero/the
-// dig-probe), so that axis can't move without dragging the physics with it.
-// This is what makes drawHeroIdle's mirrored pose (see below) land pixel-
-// identical to this one at the TITLE->GAME handoff (both put the head block/
-// legs/tail at the same spot at their respective PI/2 vs -PI/2) without any
-// offset math - a Y-mirror and an X-mirror agree at exactly the angles PI/2
-// apart that this handoff needs. The trade: moving right now swings the legs
-// up instead of down (and left, down instead of up) - reversed from before,
-// but no more or less "correct" than the old, arbitrary pick; the figure was
-// always going to corkscrew through some headings (see above), this just
-// moves which ones.
+// The pieces are positioned relative to DRILL_JOINT (so that point lands
+// at the origin here). The sheet's dx/dy layout reads "drilling left"
+// (head at the most-negative x, tail at the most-positive) - mirrored on x
+// (horn onto local +x, matching the +x convention hero.angle assumes:
+// velX=cos, velY=sin off it - see moveHero/the dig-probe) and on y (per
+// feedback - flips the art top-to-bottom on top of that). The whole figure
+// corkscrews with the heading (climbing = upside down, by design).
 function drawHero(offsetX = 0, offsetY = 0, angle = hero.angle) {
   const ctx = BUFFER_CTX;
+  const s = DRILL_SCALE;
   ctx.save();
   ctx.translate(hero.x + hero.w / 2 + offsetX, hero.y + hero.h / 2 + offsetY);
   ctx.rotate(angle);                    // +x = drill heading / horn / dig-probe direction
-  ctx.scale(1.35, 1.35);               // sprite slightly overfills the AABB - the resting silhouette just kisses the tunnel edge (feet ~15px vs the 14px radius), a hair of spill is fine
-
-  // legs first (behind the body): slim rects swinging fore/aft, the phase wave
-  // sweeping down the body reads as digging/swimming; cadence from hero.legPhase
-  ctx.fillStyle = '#fff';
-  const legX = [-9, -5, 2, 6];
-  for (let i = 0; i < 4; i++) {
-    ctx.save();
-    ctx.translate(legX[i], -4);
-    ctx.rotate(Math.sin(hero.legPhase + i * Math.PI / 2) * 0.5);
-    ctx.fillRect(-1.5, -7, 3, 7);
-    ctx.restore();
-  }
-
-  // tail - purple stub off the back, sits in the already-carved tunnel
-  ctx.fillStyle = UNICORN_ACCENT;
-  ctx.fillRect(-18, 0, 7, 5);
-
-  // body + head - white blocks
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(-12, -6, 20, 11);
-  ctx.fillRect(5, -3, 11, 11);
-
-  // horn / drill - purple triangle off the forehead, biting the ground ahead
-  ctx.fillStyle = UNICORN_ACCENT;
-  ctx.beginPath();
-  ctx.moveTo(14, 8);
-  ctx.lineTo(14, 1);
-  ctx.lineTo(25, 3.5);
-  ctx.fill();
-
+  ctx.scale(-s, -s);                    // mirror x (onto +x) and y (per feedback), then scale
+  ctx.drawImage(sprites, DRILL_HEAD.sx, DRILL_HEAD.sy, DRILL_HEAD.w, DRILL_HEAD.h,
+    DRILL_HEAD.dx - DRILL_JOINT.x, DRILL_HEAD.dy - DRILL_JOINT.y, DRILL_HEAD.w, DRILL_HEAD.h);
+  ctx.rotate(hero.bodyLagAngle);        // body+tail drag behind the head's turn, pivoting at DRILL_JOINT (current origin)
+  ctx.drawImage(sprites, DRILL_BODY.sx, DRILL_BODY.sy, DRILL_BODY.w, DRILL_BODY.h,
+    DRILL_BODY.dx - DRILL_JOINT.x, DRILL_BODY.dy - DRILL_JOINT.y, DRILL_BODY.w, DRILL_BODY.h);
+  ctx.translate(DRILL_TAIL_JOINT.x - DRILL_JOINT.x, DRILL_TAIL_JOINT.y - DRILL_JOINT.y);
+  ctx.rotate(Math.sin(hero.tailPhase) * TAIL_WIGGLE_MAX);
+  ctx.drawImage(sprites, DRILL_TAIL.sx, DRILL_TAIL.sy, DRILL_TAIL.w, DRILL_TAIL.h,
+    DRILL_TAIL.dx - DRILL_TAIL_JOINT.x, DRILL_TAIL.dy - DRILL_TAIL_JOINT.y, DRILL_TAIL.w, DRILL_TAIL.h);
   ctx.restore();
 }
 
-// same figure, built mirrored the OTHER way (every local x negated instead of
-// y - tail/legs/body/head/horn) so it faces LEFT at angle=0 instead of right.
-// Used solely by the TITLE_SCREEN/HIGHSCORE_SCREEN idle pose (see
-// titleJumpPose) - live gameplay always uses drawHero, whose Y-mirror keeps
-// the horn on hero.angle's true heading axis (see its comment); this pose
-// never moves under real physics, so it's free to mirror the other axis and
-// face left outright instead. The two mirrors agree at PI/2 apart, which is
-// exactly the gap between this pose's landing angle and drawHero's initial
-// drilling angle - see drawHero's comment for why that lines up.
-function drawHeroIdle(offsetX = 0, offsetY = 0, angle = hero.angle) {
+// TITLE_SCREEN hop only: a dedicated, non-physics draw - body and tail are
+// just held bent by a fixed JUMP_BEND for the whole hop (no wiggling, no
+// lag/whip between them). The hop is short enough the 0->JUMP_BEND snap at
+// takeoff isn't noticeable.
+function drawHeroJump(offsetX, offsetY, angle) {
   const ctx = BUFFER_CTX;
+  const s = DRILL_SCALE;
+  const bend = JUMP_BEND;
   ctx.save();
   ctx.translate(hero.x + hero.w / 2 + offsetX, hero.y + hero.h / 2 + offsetY);
   ctx.rotate(angle);
-  ctx.scale(1.35, 1.35);
+  ctx.scale(-s, -s);
+  ctx.drawImage(sprites, DRILL_HEAD.sx, DRILL_HEAD.sy, DRILL_HEAD.w, DRILL_HEAD.h,
+    DRILL_HEAD.dx - DRILL_JOINT.x, DRILL_HEAD.dy - DRILL_JOINT.y, DRILL_HEAD.w, DRILL_HEAD.h);
+  ctx.rotate(bend);
+  ctx.drawImage(sprites, DRILL_BODY.sx, DRILL_BODY.sy, DRILL_BODY.w, DRILL_BODY.h,
+    DRILL_BODY.dx - DRILL_JOINT.x, DRILL_BODY.dy - DRILL_JOINT.y, DRILL_BODY.w, DRILL_BODY.h);
+  ctx.translate(DRILL_TAIL_JOINT.x - DRILL_JOINT.x, DRILL_TAIL_JOINT.y - DRILL_JOINT.y);
+  ctx.rotate(bend);
+  ctx.drawImage(sprites, DRILL_TAIL.sx, DRILL_TAIL.sy, DRILL_TAIL.w, DRILL_TAIL.h,
+    DRILL_TAIL.dx - DRILL_TAIL_JOINT.x, DRILL_TAIL.dy - DRILL_TAIL_JOINT.y, DRILL_TAIL.w, DRILL_TAIL.h);
+  ctx.restore();
+}
 
-  ctx.fillStyle = '#fff';
-  const legX = [9, 5, -2, -6];
-  for (let i = 0; i < 4; i++) {
-    ctx.save();
-    ctx.translate(legX[i], 4);
-    ctx.rotate(Math.sin(hero.legPhase + i * Math.PI / 2) * 0.5);
-    ctx.fillRect(-1.5, 0, 3, 7);
-    ctx.restore();
-  }
-
-  ctx.fillStyle = UNICORN_ACCENT;
-  ctx.fillRect(11, -5, 7, 5);
-
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(-8, -5, 20, 11);
-  ctx.fillRect(-16, -8, 11, 11);
-
-  ctx.fillStyle = UNICORN_ACCENT;
-  ctx.beginPath();
-  ctx.moveTo(-14, -8);
-  ctx.lineTo(-14, -1);
-  ctx.lineTo(-25, -3.5);
-  ctx.fill();
-
+// title/highscore-screen idle unicorn: the static sprite (left frame of
+// sprites.webp - see IRIS_SPRITE_X's comment) rather than the animated
+// drawHero() vector figure. Rests bottom-anchored on hero's AABB the same
+// way drawIris() is anchored on the surface line (angle=0 - upright, feet on
+// the ground); titleJumpPose()'s hop rotates it around that same anchor
+// toward nose-down as it arcs into the dig, echoing the old vector figure's
+// dive even though this sprite doesn't corkscrew through headings like
+// drawHero's does.
+function drawUnicornSprite(offsetX = 0, offsetY = 0, angle = 0) {
+  const ctx = BUFFER_CTX;
+  const w = SPRITE_SIZE * UNICORN_SCALE, h = SPRITE_SIZE * UNICORN_SCALE;
+  ctx.save();
+  ctx.translate(hero.x + hero.w / 2 + offsetX, hero.y + hero.h + offsetY);
+  ctx.rotate(angle);
+  ctx.drawImage(sprites, UNICORN_SPRITE_X, 0, SPRITE_SIZE, SPRITE_SIZE, -w / 2, -h, w, h);
   ctx.restore();
 }
 

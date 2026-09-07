@@ -399,6 +399,26 @@ swells to 2x and back (`DUST_POP_DURATION`), scaling about its own centre;
 re-triggers aren't debounced, so a dense-patch burst reads as a rapid
 pulse.
 
+**Unicorn drill.** The hero renders as a 3-piece sprite ragdoll — head, body,
+tail sliced from `sprites.webp` — rigid but drilling head-first along
+`hero.angle` (`drawHero`, `GAME_SCREEN` + rewind fallback). The tail wiggles
+±15° off `hero.tailPhase`, a phase advanced by distance travelled
+(`TAIL_WIGGLE_RATE`), independent of turning. Body and tail additionally drag
+behind the head on a turn: a damped spring (`hero.bodyLagAngle`/`bodyLagVel`,
+`BODY_LAG_*` constants) chases a target proportional to the head's current
+turn rate (looked ahead `BODY_LAG_LOOKAHEAD`s, clamped to `BODY_LAG_MAX`),
+compounding with the tail wiggle. Fixed-substepped at 120 Hz, same pattern as
+the camera spring.
+
+The `TITLE_SCREEN` Start hop (see Screens) draws through a separate, dedicated
+`drawHeroJump()` instead — a plain, non-physics function: body held bent a
+fixed `JUMP_BEND` (45°) relative to the head, tail the same relative to the
+body, constant for the whole ~0.5s hop. The gameplay spring was tried here
+first and read as rigid — a transient that short doesn't give a spring time to
+build visible amplitude — so the hop uses an authored, always-on bend instead;
+the hop is quick enough the instant 0→`JUMP_BEND` snap at takeoff isn't
+noticeable.
+
 **Layer order** (far → near):
 
 ```
