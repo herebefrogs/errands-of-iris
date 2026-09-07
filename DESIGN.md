@@ -317,6 +317,18 @@ offscreen buffer is reallocated to match on resize/rotate. Vertical is the
 tension axis and gets whatever height the window gives; the sky band above
 the surface stays a fixed height, all extra vertical space goes underground.
 
+Mobile browsers don't agree on `devicePixelRatio` for the same physical
+screen (measured on a Pixel 10: Chrome reports dpr 2.625 → `innerWidth` 411;
+Firefox reports dpr 4 → `innerWidth` 270 — both ~1080 physical px wide), so
+deriving the viewport from raw `innerWidth`/`innerHeight` alone made Firefox
+show ~33% less world than Chrome on the identical screen, clipping anything
+sized to fit the wider camera (the title headline). `MOBILE_REF_DPR` is the
+dpr this was tuned on (Chrome); `resizeViewport()` scales `innerWidth`/
+`innerHeight` by `devicePixelRatio / MOBILE_REF_DPR` (mobile only, via
+`isMobile`) before deriving `CAMERA_WIDTH`/`HEIGHT`, canceling the
+discrepancy so every mobile browser shows the same amount of world on the
+same screen.
+
 The camera follows the drill on both axes with no bounds. `MAP` / `BUFFER` /
 `DUST_MASK` are 2× the viewport each way — a scroll-lookahead margin — and
 the camera pages them (shift the pixels, repaint only the newly exposed

@@ -1,4 +1,22 @@
 bugs:
+- mobile browsers disagree on devicePixelRatio for the identical physical
+  screen (measured on a Pixel 10: Chrome reports dpr=2.625 -> innerWidth 411,
+  Firefox reports dpr=4 -> innerWidth 270 - both ~1080 physical px wide,
+  since innerWidth*dpr is just the device's physical pixel width and is
+  therefore consistent across browsers even when innerWidth alone isn't), so
+  a viewport size derived from raw innerWidth/innerHeight alone shows
+  meaningfully less content in Firefox than Chrome on the same device
+  (clips anything sized to fit the Chrome-tuned viewport, e.g. a title
+  headline). Fix: derive the viewport from physical pixels
+  (innerWidth*devicePixelRatio, innerHeight*devicePixelRatio) instead of raw
+  innerWidth/innerHeight, dividing by one project-chosen "physical px per
+  world/CSS unit" density constant - this cancels the cross-browser dpr
+  disagreement on any device, unlike unidrill's actual fix (game.js
+  `resizeViewport()`/`MOBILE_REF_DPR`), which instead scales innerWidth by
+  `devicePixelRatio / MOBILE_REF_DPR` with MOBILE_REF_DPR hardcoded to
+  whatever Chrome happened to report on the one test phone - works for that
+  device pairing but isn't the general form.
+
 - inputs/pointer.js `isPointerUp()`: `pointerDownTime = 0 || true` parses as
   `pointerDownTime = (0 || true)` (`=` binds looser than `||`), so it assigns
   `true` instead of resetting to `0` - pointerDownTime never actually clears,

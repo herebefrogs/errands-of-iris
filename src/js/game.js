@@ -220,6 +220,16 @@ const DEBUG_POINTER = false;
 //   Raising RENDER_SCALE shrinks CAMERA_WIDTH, so bump it only together with a
 //   matching drop in HUD_SCALE.
 const RENDER_SCALE = 1;
+// mobile browsers disagree on devicePixelRatio for the identical physical
+// screen (measured on a Pixel 10: Chrome reports dpr=2.625 -> innerWidth 411,
+// Firefox reports dpr=4 -> innerWidth 270, both ~1080 physical px wide) - since
+// CAMERA_WIDTH/HEIGHT track raw innerWidth/innerHeight, Firefox's narrower CSS
+// viewport shrinks the world shown by ~33% and clips anything sized to fit the
+// wider (Chrome-tuned) camera, e.g. the title headline. MOBILE_REF_DPR is the
+// dpr this was tuned/looks right on (Chrome); normalizing innerWidth/Height
+// against it before deriving CAMERA_WIDTH/HEIGHT cancels the discrepancy so
+// every mobile browser shows the same amount of world on the same screen.
+const MOBILE_REF_DPR = 2.625;
 const VIEW_MIN = 256;                   // clamp floor for either viewport axis - only guards absurdly small windows; a clamped axis means letterbox (see resizeViewport), so keep it below every real device
 const VIEW_MAX = 2048;                  // clamp ceiling on either viewport axis: the 2x scroll buffer is then 4096, the safe canvas-dimension cap (iOS Safari). 4K-and-up displays pillarbox/letterbox the excess.
 // camera/viewport size in world px. BOTH axes are derived from the live window
@@ -2508,8 +2518,11 @@ addEventListener('pointerdown', unlockMusic);
 // smoothing re-disable here). Only acts on a real change - mobile fires resize
 // on every URL-bar show/hide.
 function resizeViewport() {
-  const w = clamp(Math.round(innerWidth  / RENDER_SCALE / CELL_SIZE) * CELL_SIZE, VIEW_MIN, VIEW_MAX);
-  const h = clamp(Math.round(innerHeight / RENDER_SCALE / CELL_SIZE) * CELL_SIZE, VIEW_MIN, VIEW_MAX);
+  // see MOBILE_REF_DPR above - only mobile browsers disagree on dpr for the
+  // same screen, so only correct innerWidth/Height on mobile.
+  const dprScale = isMobile ? devicePixelRatio / MOBILE_REF_DPR : 1;
+  const w = clamp(Math.round(innerWidth  * dprScale / RENDER_SCALE / CELL_SIZE) * CELL_SIZE, VIEW_MIN, VIEW_MAX);
+  const h = clamp(Math.round(innerHeight * dprScale / RENDER_SCALE / CELL_SIZE) * CELL_SIZE, VIEW_MIN, VIEW_MAX);
   if (w === CAMERA_WIDTH && h === CAMERA_HEIGHT) return false;
   CAMERA_WIDTH = w;
   CAMERA_HEIGHT = h;
