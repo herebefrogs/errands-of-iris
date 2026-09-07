@@ -5,14 +5,10 @@ for the reasoning behind each of these; this is just the sequencing.
 Completed items are moved to `CHANGELOG.md` (an archive, not read on startup)
 as they land — this list stays scoped to open work.
 
-- [ ] End headline becomes Iris's reaction to the rainbow, not a neutral
-      status — warm line scaled to the haul at the top, `dry run!` at zero
-      still works as-is. Iris herself is drawn and animated now (walks to
-      the rainbow's near foot, rides it out — see CHANGELOG, "Draw Iris and
-      animate her on the title and end screens"); this is just the headline
-      text, currently the placeholder `well dug!`/`dry run!`/`double
-      rainbow!` trio. When this lands, sync DESIGN.md's Run end / score
-      section.
+- [ ] Add ROCK as a third material. Solid and undrillable — the drill can't
+      carve it. On contact it deflects the player's heading (bounce) rather
+      than stopping them dead. See DESIGN.md (materials, and the rock
+      deflection open question).
 
 ## Bugs
 
@@ -45,11 +41,6 @@ as they land — this list stays scoped to open work.
 - [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
       https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
       (and possibly an older commit in gamejam-boilerplate's own history).
-- [ ] Add ROCK as a third material. Solid and undrillable — the drill can't
-      carve it. On contact it deflects the player's heading (bounce) rather
-      than stopping them dead. See DESIGN.md (materials, and the rock
-      deflection open question). Deprioritised — the core loop works without
-      a hard obstacle for now.
 
 ## Ideas — not yet designed
 
@@ -68,6 +59,7 @@ Half-formed; each needs a design pass before it becomes a build item.
       patch?) before it's worth prototyping. Risk: the game's pleasure is
       carving your own path — anything that demands twitch dodging could
       fight that.
+
 ## Won't do
 
 - Bingo-fuel warning. Was: a HUD alert when the player likely can't climb
