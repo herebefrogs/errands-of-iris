@@ -42,8 +42,9 @@ back to the surface with what you've got before you run out of momentum.**
   (deceleration) — sand barely bites, clay eats momentum fast — on top of a
   small material-independent entropy that always applies underground.
   Backtracking up an already-carved tunnel is cheap (tunnel drag + entropy
-  only), which is what makes the return trip affordable. Rock, once added,
-  deflects the unicorn instead of dragging.
+  only), which is what makes the return trip affordable. A third,
+  undrillable rock material with bounce-deflection was prototyped and
+  dropped — see TODO.md "Won't do".
 - Rainbow dust comes in sparse patches (small yield, dust cells scattered
   on a dither mask) and dense patches (bigger yield + momentum boost, dust
   cells packed in a jittered blob). Dust is an **orthogonal field** laid
@@ -668,10 +669,10 @@ irregular clusters.
    otherwise             → SAND
 ```
 
-Only two materials so far — **SAND** (traversable / background) and **CLAY**
-(the dense blob/FILLED material). A distinct rock material with deflection
-behaviour is still a future addition (see Open questions); the blob pass is
-named "rock" in the code but currently emits `CLAY`.
+Only two materials — **SAND** (traversable / background) and **CLAY** (the
+dense blob/FILLED material). A distinct undrillable rock material with
+bounce deflection was prototyped and dropped (see TODO.md "Won't do"); the
+blob pass is still named "rock" in the code but only ever emits `CLAY`.
 
 Depth-bias idea (not yet decided): bias the pattern weights / blob chance by
 a slow function of depth, so dense/solid terrain (and later dense dust)
@@ -779,8 +780,8 @@ mid-flight, see Graphics — Collection animation), not at dig time.
 
 - Camera tracking: RESOLVED — spring + projected focus off a lagged velocity,
   see "Graphics — Camera tracking" above. Constants are still playtest bait.
-- Rock deflection behavior (once rock is added) — bounce angle, momentum
-  cost, or both?
+- Rock deflection behavior: RESOLVED — won't do. See TODO.md "Won't do" for
+  what was tried and why it was dropped.
 - Dense-dust momentum boost: RESOLVED. Shipped **per collected cell**
   (`MOMENTUM.denseBoost`); `digShaft()` clears several cells per tick so
   patch entry is a jolt. The cap question landed on **transient

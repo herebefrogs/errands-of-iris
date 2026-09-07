@@ -5,11 +5,6 @@ for the reasoning behind each of these; this is just the sequencing.
 Completed items are moved to `CHANGELOG.md` (an archive, not read on startup)
 as they land — this list stays scoped to open work.
 
-- [ ] Add ROCK as a third material. Solid and undrillable — the drill can't
-      carve it. On contact it deflects the player's heading (bounce) rather
-      than stopping them dead. See DESIGN.md (materials, and the rock
-      deflection open question).
-
 ## Bugs
 
 (none open)
@@ -93,3 +88,30 @@ Half-formed; each needs a design pass before it becomes a build item.
   no-penalty version — pure momentum management, drag from terrain only,
   speed from dense dust — is simpler and more intuitive: one source of
   slowdown (terrain), one source of speed (dust). Keeping that.
+
+- ROCK as a third material. Was: a solid, undrillable material (own rare
+  blob field, independent of clay) that deflects the drill's heading on
+  contact instead of stopping it dead. Prototyped and dropped. What we
+  found:
+  - The reflection is axis-aligned (probe the blocked cell's two neighbors
+    to tell a vertical face from a horizontal one apart) rather than a true
+    surface-normal bounce — cheap, but it means only a shallow-angle hit
+    naturally deflects clear. Anything close to a head-on hit reflects
+    almost straight back the way it came, which is very hard to land on
+    purpose with keyboard's 8 fixed directions (more manageable with the
+    analog D-pad on mobile) — in practice most hits read as "close to
+    normal," so most hits felt like a wall, not a deflection.
+  - Tried a momentum penalty on bounce (`*= 0.8`) to make ramming feel
+    costly — combined with the near-head-on problem above, a couple of
+    bounces in a row (steering re-aiming back into the rock before the
+    reflection could carry the drill clear, even after adding a brief
+    post-bounce steering lock) drained most of the run's speed. Dropped the
+    penalty entirely (pure direction change, no speed cost) as a last try —
+    still didn't read as fun, just as an annoyance layered on the aiming
+    problem above.
+  - Root issue is the deflection geometry, not the tuning: a fair, fun bounce
+    needs the reflection to actually feel aimable, which likely means a real
+    surface-normal reflection (derived from the blob's shape, not axis
+    probes) rather than more constant-tweaking. Not worth the time to chase
+    for the payoff — dropping the feature. Revisit only with a genuinely
+    different deflection approach in mind, not a retune of this one.
