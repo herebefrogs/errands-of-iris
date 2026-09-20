@@ -216,6 +216,7 @@ const DEBUG_POINTER = false;
 // World px; glasses crosstalk means overdoing any separation just ghosts, so
 // keep all three small.
 let anaglyph = false;
+function toggleAnaglyph() { anaglyph = !anaglyph; }
 const ANAGLYPH_BG_SEP = 2;
 const ANAGLYPH_MID_SEP = 4;
 const ANAGLYPH_FG_SEP = 6;
@@ -498,7 +499,6 @@ function renderHud() {
     const cx = DUST_COUNTER_X + textWidth(str, HUD_SCALE) / 2;
     renderText(str, cx, DUST_COUNTER_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
   }
-  if (anaglyph) renderText('3D', CAMERA_WIDTH - HUD_X, SPEED_VALUE_Y, ALIGN_RIGHT, HUD_SCALE);
 }
 
 const ATLAS = {};
@@ -781,6 +781,9 @@ function titleMenuItems() {
     // label, same as P for pause; Up/Down+Enter/Space already makes menu
     // navigation obvious enough without also flagging every shortcut.
     { label: 'Music: ' + volumePct + '%', sizeLabel: 'Music: 50%', action: cycleVolume },
+    // G still toggles it directly (see processInputs) - undocumented in the
+    // label, same as M for Music above.
+    { label: 'Anaglyph: ' + (anaglyph ? 'on' : 'off'), sizeLabel: 'Anaglyph: off', action: toggleAnaglyph },
     { label: 'Highscores', action: goHighscores },
     { label: 'New seed', action: rerollSeed },
   ];
@@ -823,7 +826,10 @@ function titleMenuLayout() {
   const items = titleMenuItems();
   const blockH = items.length * TITLE_MENU_ROW;
   const lowerHalfTop = CAMERA_HEIGHT / 2;
-  const top = lowerHalfTop + (CAMERA_HEIGHT - lowerHalfTop - blockH) / 2;
+  // shifted up ~1 row off dead-centre: the permanent "Seed: ..." line below
+  // the last item (see its renderText call) isn't counted in blockH, so a
+  // plain centre leaves it hugging (or on mobile, clipping) the screen edge.
+  const top = lowerHalfTop + (CAMERA_HEIGHT - lowerHalfTop - blockH) / 2 - TITLE_MENU_ROW;
   const chevronW = textWidth('>  ', TITLE_MENU_SCALE);   // extra trailing space: a visual gap before the label column
   const labelW = Math.max(...items.map(item => textWidth(item.sizeLabel || item.label, TITLE_MENU_SCALE)));
   const blockW = chevronW + labelW;
@@ -1168,7 +1174,7 @@ function processInputs() {
   // the boot gates / steering never see it.
   if (isKeyUp('KeyM')) cycleVolume();
   // anaglyph red/cyan mode toggle, every screen - same shape as KeyM above.
-  if (isKeyUp('KeyG')) anaglyph = !anaglyph;
+  if (isKeyUp('KeyG')) toggleAnaglyph();
 
   switch (screen) {
     case TITLE_SCREEN: {
@@ -2085,6 +2091,10 @@ function render() {
       }
       break;
   }
+
+  // shown on every screen (not just where renderHud() runs) so the player
+  // always knows the mode is on, e.g. from TITLE_SCREEN's own menu toggle.
+  if (anaglyph) renderText('3D', CAMERA_WIDTH - HUD_X, SPEED_VALUE_Y, ALIGN_RIGHT, HUD_SCALE);
 
   blit();
 

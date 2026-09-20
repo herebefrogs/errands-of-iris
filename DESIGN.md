@@ -440,11 +440,14 @@ noticeable.
   HUD layer          speed, shaft, dust counter (TEXT buffer)
 ```
 
-**Anaglyph red/cyan mode** (G toggles, any screen — same shape as the M mute
-toggle; no budget constraint post-competition, see TODO.md). The game has no
-real z-axis (it's a side-view drill shaft), so the 3D pop comes from fake
-depth — a horizontal parallax offset between three draw planes, sampled once
-per eye and additively recombined through a red/cyan color split.
+**Anaglyph red/cyan mode** (G toggles, any screen, or the title menu's
+"Anaglyph: on/off" item below Music — same shape as M/Music; no budget
+constraint post-competition, see TODO.md). A small "3D" label shows in the
+corner on every screen while it's on (drawn once in `render()` right before
+`blit()`, not inside `renderHud()`, which only runs on GAME/END). The game
+has no real z-axis (it's a side-view drill shaft), so the 3D pop comes from
+fake depth — a horizontal parallax offset between three draw planes, sampled
+once per eye and additively recombined through a red/cyan color split.
 
 `BUFFER` used to be one flattened surface — `clearBuffer()` painted raw
 terrain into it, then `renderDust()`, `renderParticles()`, and `drawHero()`
@@ -483,8 +486,7 @@ accumulated like the paged `MAP`/`BUFFER`.
   `index.html`, referenced via `ctx.filter = 'url(#...)'`) and combining with
   `globalCompositeOperation = 'lighter'` (additive) on the second eye. `TEXT`
   (HUD) draws last, unshifted and un-tinted — stereo HUD text is illegible
-  and gains nothing; a small "3D" label shows in the corner instead
-  (`renderHud()`) so the player knows the mode is on.
+  and gains nothing.
 
 Color split is Dubois half-color, not plain grayscale — the dust rainbow is
 the game's visual hook, and full desaturation would erase it. `feColorMatrix`

@@ -539,3 +539,13 @@ Roughly in build order, oldest first.
       `ANAGLYPH_BG_SEP=2`, `ANAGLYPH_MID_SEP=4`, `ANAGLYPH_FG_SEP=6` after
       playtesting higher separations (10-12) felt like more pop but started
       to hurt/ghost through real glasses.
+
+- [x] Anaglyph mode discoverability: an "Anaglyph: on/off" title-menu item
+      below Music (`toggleAnaglyph()`, shared with the G key), and moved the
+      "3D" corner label out of `renderHud()` (GAME/END only) to right after
+      `render()`'s screen switch so it shows on every screen, including
+      TITLE where the new menu item lives. Also nudged `titleMenuLayout()`'s
+      block up one `TITLE_MENU_ROW` off dead-centre — the permanent
+      "Seed: ..." line below the last item was never counted in its height,
+      so centering on item count alone left it hugging (or on some mobile
+      viewports, clipping) the bottom edge.
