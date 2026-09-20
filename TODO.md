@@ -33,9 +33,7 @@ as they land — this list stays scoped to open work.
       ~40–50% headroom, so keep them for now — handy for re-tuning the
       `CAMERA_*` constants and the pointer `RAMP`/`DEAD`. (Keep the plain
       base+knob D-pad overlay — that's the shipped control, not debug.)
-- [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
-      https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
-      (and possibly an older commit in gamejam-boilerplate's own history).
+
 ## Ideas — not yet designed
 
 Half-formed; each needs a design pass before it becomes a build item.

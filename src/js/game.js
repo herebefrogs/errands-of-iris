@@ -1,3 +1,4 @@
+import { gamepadPollData } from './inputs/gamepad';
 import { isKeyDown, anyKeyDown, isKeyUp } from './inputs/keyboard';
 import { isPointerDown, isPointerUp, pointerCanvasPosition, pointerDirection, pointerPad } from './inputs/pointer';
 import { isMobile } from './mobile';
@@ -1168,6 +1169,28 @@ function updateIrisRide() {
   if (t >= 1) { irisRideT = irisArc = undefined; irisGroundOffset = 0; }
 }
 
+// GAME_SCREEN: stick deflection under this counts as centred/noise, not
+// steering input - real sticks don't rest at exactly 0. TITLE_SCREEN/
+// END_SCREEN/HIGHSCORE_SCREEN menu nav uses its own, much coarser
+// GAMEPAD_MENU_DEADZONE below (a deliberate up/down decision, not continuous
+// movement).
+const GAMEPAD_MOVE_DEADZONE = 0.15;
+const GAMEPAD_MENU_DEADZONE = 0.5;
+// gamepad.js's poll has no press/release events of its own (see its header
+// comment) - buttonA/B, the D-pad, and the left-stick Y axis are edge-
+// detected into one-shot flags here instead, computed once per frame
+// regardless of screen (same reasoning as isKeyUp being screen-agnostic):
+// gamepadYArmed re-arms once the stick returns under GAMEPAD_MENU_DEADZONE so
+// a nav step can't auto-repeat while held, and the *Was trackers hold the
+// previous frame's button/D-pad state so the one-shot flags below only fire
+// on the actual rising edge - tracking them unconditionally (not just while a
+// menu is active) means a button/D-pad direction already held when a new
+// menu screen appears can't look like a fresh press just because tracking
+// only just started.
+let gamepadYArmed = true;
+let gamepadAWas = false, gamepadBWas = false;
+let gamepadDpadUpWas = false, gamepadDpadDownWas = false;
+
 function processInputs() {
   // volume step, every screen (also the title menu's Music item). isKeyUp
   // consumes KeyM on the frame it's pressed (it releases whatever's down), so
@@ -1175,6 +1198,31 @@ function processInputs() {
   if (isKeyUp('KeyM')) cycleVolume();
   // anaglyph red/cyan mode toggle, every screen - same shape as KeyM above.
   if (isKeyUp('KeyG')) toggleAnaglyph();
+
+  // polled once per frame, shared by every case below (see the block comment
+  // above): gamepadA/B are one-shot "just pressed" edges (A = select, B =
+  // back - standard Xbox/W3C mapping), gamepadNav is -1 (up)/0/+1 (down), for
+  // the TITLE/END/HIGHSCORE chevron menus - from the left stick's Y edge
+  // (right stick steps in once left reads as unused, i.e. under
+  // GAMEPAD_MENU_DEADZONE - same left-has-precedence rule as GAME_SCREEN's
+  // steering below), or the D-pad's up/down edge, whichever fires.
+  const gamepad = gamepadPollData();
+  const gamepadA = !!gamepad && gamepad.buttonA && !gamepadAWas;
+  const gamepadB = !!gamepad && gamepad.buttonB && !gamepadBWas;
+  gamepadAWas = !!gamepad && gamepad.buttonA;
+  gamepadBWas = !!gamepad && gamepad.buttonB;
+  const gamepadDpadUp = !!gamepad && gamepad.dpadUp && !gamepadDpadUpWas;
+  const gamepadDpadDown = !!gamepad && gamepad.dpadDown && !gamepadDpadDownWas;
+  gamepadDpadUpWas = !!gamepad && gamepad.dpadUp;
+  gamepadDpadDownWas = !!gamepad && gamepad.dpadDown;
+  let gamepadNav = 0;
+  if (gamepad) {
+    const navY = Math.abs(gamepad.leftY) >= GAMEPAD_MENU_DEADZONE ? gamepad.leftY : gamepad.rightY;
+    if (Math.abs(navY) < GAMEPAD_MENU_DEADZONE) gamepadYArmed = true;
+    else if (gamepadYArmed) { gamepadYArmed = false; gamepadNav = navY > 0 ? 1 : -1; }
+  }
+  if (gamepadDpadUp) gamepadNav = -1;
+  else if (gamepadDpadDown) gamepadNav = 1;
 
   switch (screen) {
     case TITLE_SCREEN: {
@@ -1186,9 +1234,11 @@ function processInputs() {
       if (!anyKeyDown() && !isPointerDown()) titleArmed = true;
       if (!titleArmed) break;
       const items = titleMenuLayout();
-      if (isKeyUp('ArrowUp')) titleIndex = (titleIndex - 1 + items.length) % items.length;
-      if (isKeyUp('ArrowDown')) titleIndex = (titleIndex + 1) % items.length;
-      if (isKeyUp('Enter') || isKeyUp('Space')) items[titleIndex].action();
+      // no Back item on this screen (it's the root menu) - gamepadB is unused
+      // here, see END_SCREEN.
+      if (isKeyUp('ArrowUp') || gamepadNav < 0) titleIndex = (titleIndex - 1 + items.length) % items.length;
+      if (isKeyUp('ArrowDown') || gamepadNav > 0) titleIndex = (titleIndex + 1) % items.length;
+      if (isKeyUp('Enter') || isKeyUp('Space') || gamepadA) items[titleIndex].action();
       if (isPointerUp()) {
         const [px, py] = pointerViewportPosition();
         const hit = items.findIndex(it => px >= it.x0 && px <= it.x1 && py >= it.y0 && py <= it.y1);
@@ -1198,12 +1248,26 @@ function processInputs() {
     }
     case GAME_SCREEN: {
       // steering only, no throttle: the drill always thrusts forward along
-      // hero.angle (see moveHero). Both input paths pick an ABSOLUTE target
+      // hero.angle (see moveHero). All input paths pick an ABSOLUTE target
       // heading - Up is up on the descent AND the climb, no bank-model
       // inversion - then hero.angle rotates toward it at TURN_SPEED.
       let dx = 0, dy = 0;
       if (isPointerDown()) {
         [dx, dy] = pointerDirection();
+      } else if (gamepad) {
+        // drop-in replacement for the pointer's floating D-pad - same [-1,1]²
+        // vector shape, just sourced from an analog stick instead of a drag.
+        // GAMEPAD_MOVE_DEADZONE eats stick centring noise (a real stick
+        // rarely rests at exactly 0). Left stick has precedence; the right
+        // stick only takes over once the left one reads as fully unused
+        // (both axes zeroed by the deadzone), so resting a thumb on the
+        // right stick while steering with the left doesn't fight it.
+        dx = Math.abs(gamepad.leftX) > GAMEPAD_MOVE_DEADZONE ? gamepad.leftX : 0;
+        dy = Math.abs(gamepad.leftY) > GAMEPAD_MOVE_DEADZONE ? gamepad.leftY : 0;
+        if (!dx && !dy) {
+          dx = Math.abs(gamepad.rightX) > GAMEPAD_MOVE_DEADZONE ? gamepad.rightX : 0;
+          dy = Math.abs(gamepad.rightY) > GAMEPAD_MOVE_DEADZONE ? gamepad.rightY : 0;
+        }
       } else {
         // e.code is physical: AZERTY's ZQSD sits on physical KeyW/KeyQ/KeyS/
         // KeyD, so KeyW/KeyS already serve both layouts; only left needs KeyQ.
@@ -1259,10 +1323,10 @@ function processInputs() {
       if (!anyKeyDown() && !isPointerDown()) endArmed = true;
       if (!endArmed) break;
       const items = endMenuLayout();
-      if (isKeyUp('ArrowUp')) endIndex = (endIndex - 1 + items.length) % items.length;
-      if (isKeyUp('ArrowDown')) endIndex = (endIndex + 1) % items.length;
-      if (isKeyUp('Enter') || isKeyUp('Space')) items[endIndex].action();
-      if (isKeyUp('Escape')) goTitle();
+      if (isKeyUp('ArrowUp') || gamepadNav < 0) endIndex = (endIndex - 1 + items.length) % items.length;
+      if (isKeyUp('ArrowDown') || gamepadNav > 0) endIndex = (endIndex + 1) % items.length;
+      if (isKeyUp('Enter') || isKeyUp('Space') || gamepadA) items[endIndex].action();
+      if (isKeyUp('Escape') || gamepadB) goTitle();
       if (isPointerUp()) {
         const [px, py] = pointerViewportPosition();
         const hit = items.findIndex(it => px >= it.x0 && px <= it.x1 && py >= it.y0 && py <= it.y1);
@@ -1280,10 +1344,10 @@ function processInputs() {
       // appended as the last row (see highscoreLayout), so Down off the last
       // score lands there, and Down again wraps back to the first score -
       // same chevron-menu shape as TITLE_SCREEN/END_SCREEN.
-      if (isKeyUp('ArrowUp')) highscoreIndex = (highscoreIndex - 1 + rows.length) % rows.length;
-      if (isKeyUp('ArrowDown')) highscoreIndex = (highscoreIndex + 1) % rows.length;
-      if (isKeyUp('Enter') || isKeyUp('Space')) selectRow(rows[highscoreIndex]);
-      if (isKeyUp('Escape')) goTitle();
+      if (isKeyUp('ArrowUp') || gamepadNav < 0) highscoreIndex = (highscoreIndex - 1 + rows.length) % rows.length;
+      if (isKeyUp('ArrowDown') || gamepadNav > 0) highscoreIndex = (highscoreIndex + 1) % rows.length;
+      if (isKeyUp('Enter') || isKeyUp('Space') || gamepadA) selectRow(rows[highscoreIndex]);
+      if (isKeyUp('Escape') || gamepadB) goTitle();
       if (isPointerUp()) {
         const [px, py] = pointerViewportPosition();
         const hit = rows.findIndex(r => px >= r.x0 && px <= r.x1 && py >= r.y0 && py <= r.y1);

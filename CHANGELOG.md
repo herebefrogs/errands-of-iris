@@ -549,3 +549,36 @@ Roughly in build order, oldest first.
       "Seed: ..." line below the last item was never counted in its height,
       so centering on item count alone left it hugging (or on some mobile
       viewports, clipping) the bottom edge.
+
+- [x] Gamepad support (Xbox / W3C "standard" mapping). `src/js/inputs/
+      gamepad.js` copied over unchanged from the boilerplate template's own
+      cross-browser quirk-testing pass (`navigator.getGamepads()` polled
+      every frame - connect/disconnect events proved too unreliable across
+      Chrome/Firefox/Safari, see the file's header). GAME_SCREEN: the left
+      stick is a drop-in replacement for the pointer's floating D-pad (same
+      [-1,1]² vector into the same steering math), slotted between pointer
+      and keyboard in priority, with its own `GAMEPAD_MOVE_DEADZONE` since a
+      real stick doesn't rest at exactly 0. TITLE/END/HIGHSCORE_SCREEN: the
+      stick's Y axis steps the chevron menu up/down, button A selects,
+      button B is Back (END/HIGHSCORE's Escape-equivalent; TITLE has no Back).
+      The raw poll has no press/release events of its own, so game.js
+      edge-detects buttonA/B into one-shot flags itself (`gamepadAWas`/
+      `BWas`) and the Y axis into a re-arming nav step (`gamepadYArmed`) -
+      both tracked unconditionally every frame, not just while a menu is
+      active, so a button/stick already held when a new menu screen appears
+      can't look like a fresh input (same held-over-input problem
+      `titleArmed`/`endArmed` solve for keyboard/pointer, solved here by
+      edge detection instead of a separate arm-gate).
+
+- [x] Gamepad: right stick + D-pad. `gamepad.js` re-pulled from the
+      boilerplate template (again copied unchanged) once it exposed the full
+      standard mapping - `rightX/Y`, bumpers, analog triggers, `back`/`start`,
+      stick-click buttons, `dpadUp/Down/Left/Right` - instead of just the left
+      stick and face buttons. Wired up: the right stick now steers
+      (GAME_SCREEN) / navigates menus (TITLE/END/HIGHSCORE_SCREEN) as a
+      fallback for the left stick, taking over only once the left one reads
+      as fully unused (both axes under its deadzone) - left has precedence,
+      right isn't a second simultaneous input. D-pad up/down also step the
+      chevron menu, edge-detected the same one-shot way as buttonA/B
+      (`gamepadDpadUpWas`/`DownWas`). Bumpers/triggers/back/start/stick-clicks
+      aren't wired to anything yet - just along for the ride in the poll.

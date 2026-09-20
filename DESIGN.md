@@ -262,12 +262,26 @@ up whether descending or climbing, no inversion between the legs.
   angle reaches the heading math; the ramp magnitude drives the on-screen
   overlay (base disc + knob on the finger; `DEBUG_POINTER` shows the full
   model breakdown).
-- **M**: step the master volume (see Music & sound). Works on every screen —
-  undocumented on the title menu's Music item (like Space/Enter's overlap with
-  the chevron menu, it's a shortcut for a control that's already reachable the
-  normal way).
+- Gamepad (Xbox / W3C "standard" mapping, `src/js/inputs/gamepad.js`): the
+  left stick is a drop-in replacement for the pointer's floating D-pad — same
+  `[-1,1]²` vector into the same heading math, just with its own small
+  deadzone since a real stick doesn't rest at exactly 0. Slots in between
+  pointer and keyboard in priority (pointer still wins if both are active).
+  The right stick steers too, but only once the left one reads as fully
+  unused (both axes zeroed by the deadzone) — left has precedence, right is a
+  fallback, not a second simultaneous input. On `TITLE`/`END`/`HIGHSCORE`,
+  the Y axis (left, or right when left is unused — same precedence rule) or
+  the D-pad's up/down steps the chevron menu instead, button A selects (same
+  as Enter/Space/tap), button B is Back (same as Esc, only where that screen
+  has a Back item — `TITLE` doesn't).
+- **M**: step the master volume (see Music & sound). **G**: toggle anaglyph
+  red/cyan mode (see Graphics). Both work on every screen — undocumented on
+  the title menu's own Music/Anaglyph items (like Space/Enter's overlap with
+  the chevron menu, they're shortcuts for controls that are already reachable
+  the normal way).
 - **Esc**: on `END`/`HIGHSCORE`, back to `TITLE` — same destination as those
-  screens' "Back to main menu" menu item, just a shortcut past it.
+  screens' "Back to main menu" menu item, just a shortcut past it (gamepad's
+  button B does the same on `END`).
 
 **World edges.** The map is unbounded left, right and down — the drill can
 roam sideways as far as it likes, momentum decay is the only limit on a
