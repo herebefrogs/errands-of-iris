@@ -36,7 +36,6 @@ as they land — this list stays scoped to open work.
 - [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
       https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
       (and possibly an older commit in gamejam-boilerplate's own history).
-
 ## Ideas — not yet designed
 
 Half-formed; each needs a design pass before it becomes a build item.

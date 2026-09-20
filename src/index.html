@@ -19,5 +19,26 @@
 </style>
 <body>
   <canvas id=c></canvas>
+  <!-- Dubois-matrix red/cyan anaglyph filters (see DESIGN.md "anaglyph red/cyan
+       mode"), referenced from game.js via ctx.filter = 'url(#anaglyphLeft/Right)'.
+       color-interpolation-filters=sRGB matters: SVG filters default to linearRGB,
+       which would relinearize these matrices (fit for gamma-encoded sRGB input)
+       and shift the colors. -->
+  <svg style="position:absolute;width:0;height:0">
+    <filter id="anaglyphLeft" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="
+        0.437  0.449  0.164  0 0
+        -0.062 -0.062 -0.024 0 0
+        -0.048 -0.050 -0.017 0 0
+        0      0      0      1 0" />
+    </filter>
+    <filter id="anaglyphRight" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="
+        -0.011 -0.032 -0.007 0 0
+        0.377  0.761  0.009  0 0
+        -0.026 -0.093 1.234  0 0
+        0      0      0      1 0" />
+    </filter>
+  </svg>
   <script src=game.js></script>
 </body>
