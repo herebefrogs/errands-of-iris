@@ -205,22 +205,24 @@ const DEBUG_CAMERA = false;
 // steering spoke, raw finger dot) instead of the plain base+knob. Tuning aid.
 const DEBUG_POINTER = false;
 // anaglyph red/cyan mode (G toggles, see processInputs) - see DESIGN.md
-// "Stretch goal: anaglyph red/cyan mode". blitAnaglyph() draws BUFFER
-// (terrain + dust - dust is masked to the exact dug-tunnel shape baked into
-// BUFFER, so it has to share BUFFER's offset or it visibly detaches from the
-// tunnel silhouette) and FG (particles+hero/Iris - free-floating sprites, not
-// terrain-locked) twice each, once per eye, at a small horizontal offset
-// apart - BG_SEP for the background so it barely moves, FG_SEP (larger) so
-// the animation layer pops toward the viewer - then Dubois-matrix-filters
-// (see index.html's <svg> defs) and additively blends the two eyes. World px;
-// glasses crosstalk means overdoing either separation just ghosts, so keep
-// both small.
+// "Anaglyph red/cyan mode". blitAnaglyph() draws 3 depth planes twice each,
+// once per eye, at a small horizontal offset apart, then Dubois-matrix-
+// filters (see index.html's <svg> defs) and additively blends the two eyes:
+//   BUFFER (terrain + dust)       - BG_SEP.  Dust is masked to the exact
+//     dug-tunnel shape baked into BUFFER's terrain, so it has to share
+//     BUFFER's offset or it visibly detaches from the tunnel silhouette.
+//   MID    (hero + Iris)         - MID_SEP.
+//   FG     (in-flight particles) - FG_SEP (largest - particles pop most).
+// World px; glasses crosstalk means overdoing any separation just ghosts, so
+// keep all three small.
 let anaglyph = false;
 const ANAGLYPH_BG_SEP = 2;
+const ANAGLYPH_MID_SEP = 4;
 const ANAGLYPH_FG_SEP = 6;
 // clearBuffer()'s repaint/clear rect is inflated by this on every side so a
 // shifted anaglyph sample (up to ANAGLYPH_FG_SEP past the plain camera rect)
-// never reads stale BUFFER/FG content just outside the normal camera window.
+// never reads stale BUFFER/MID/FG content just outside the normal camera
+// window.
 const ANAGLYPH_MARGIN = ANAGLYPH_FG_SEP;
 const ANAGLYPH_FILTER_LEFT = 'url(#anaglyphLeft)';
 const ANAGLYPH_FILTER_RIGHT = 'url(#anaglyphRight)';
@@ -313,12 +315,17 @@ const BUFFER = c.cloneNode();           // backbuffer: terrain + dust colouring 
 const BUFFER_CTX = BUFFER.getContext('2d');
 BUFFER.width = 2 * CAMERA_WIDTH;        // 2x viewport each way: a scroll-lookahead margin the camera pages through (scrollMap). resizeViewport() re-applies both.
 BUFFER.height = 2 * CAMERA_HEIGHT;
-// DESIGN.md's "animation layer" minus dust (particles + hero/Iris sprites -
-// free-floating, not locked to the terrain shape the way dust colouring is,
-// see renderDust) - kept as its own buffer-space canvas, same size/space as
-// BUFFER, so blit() can composite it with a different parallax offset than
-// the terrain (anaglyph mode). Fully transient: cleared and repainted every
-// frame by clearBuffer() + render(), never paged/self-blit like MAP/BUFFER.
+// DESIGN.md's "animation layer" minus dust (dust stays on BUFFER - it's
+// locked to the terrain shape, see renderDust), split across two more
+// buffer-space canvases (same size/space as BUFFER) so blit() can give each
+// its own anaglyph parallax offset: MID (hero/Iris sprites) and FG (in-flight
+// collection particles, the nearest plane). Both fully transient: cleared and
+// repainted every frame by clearBuffer() + render(), never paged/self-blit
+// like MAP/BUFFER.
+const MID = c.cloneNode();
+const MID_CTX = MID.getContext('2d');
+MID.width = 2 * CAMERA_WIDTH;
+MID.height = 2 * CAMERA_HEIGHT;
 const FG = c.cloneNode();
 const FG_CTX = FG.getContext('2d');
 FG.width = 2 * CAMERA_WIDTH;
@@ -1108,7 +1115,7 @@ function seatIris(bubbleTextX) {
 }
 function drawIris() {
   const w = IRIS_W * IRIS_SCALE, h = IRIS_H * IRIS_SCALE;
-  FG_CTX.drawImage(sprites, IRIS_SPRITE_X, 0, IRIS_W, IRIS_H, irisWorldX - mapOffsetX - w / 2, SURFACE_Y - mapOffset - h + irisGroundOffset, w, h);
+  MID_CTX.drawImage(sprites, IRIS_SPRITE_X, 0, IRIS_W, IRIS_H, irisWorldX - mapOffsetX - w / 2, SURFACE_Y - mapOffset - h + irisGroundOffset, w, h);
 }
 
 // end-of-run sequence, two phases chained end to end: (1) walk from wherever
@@ -1899,10 +1906,15 @@ function blit() {
   if (anaglyph) blitAnaglyph();
   else {
     // copy camera portion of the terrain + animation layers onto the visible
-    // canvas, scaling to screen dimensions. Same camera rect for both - FG's
-    // transparent areas let BUFFER's terrain show through underneath.
+    // canvas, scaling to screen dimensions. Same camera rect for all three -
+    // MID's/FG's transparent areas let what's underneath show through.
     CTX.drawImage(
       BUFFER,
+      Math.floor(cameraX), cameraY, CAMERA_WIDTH, CAMERA_HEIGHT,
+      0, 0, c.width, c.height
+    );
+    CTX.drawImage(
+      MID,
       Math.floor(cameraX), cameraY, CAMERA_WIDTH, CAMERA_HEIGHT,
       0, 0, c.width, c.height
     );
@@ -1919,14 +1931,16 @@ function blit() {
   );
 };
 
-// anaglyph mode: build each eye's terrain+animation composite at viewport
-// size in EYE (BUFFER at a small ANAGLYPH_BG_SEP offset, FG at a larger
-// ANAGLYPH_FG_SEP so it pops toward the viewer), then draw it onto the
-// visible canvas through that eye's Dubois color filter, additively blended
-// with the other eye ('lighter' on the 2nd draw - the 1st is a plain
-// source-over reset of the frame). See DESIGN.md "anaglyph red/cyan mode".
-function drawEye(bx, by, fx, fy, filter, compositeOp) {
+// anaglyph mode: build each eye's 3-plane composite at viewport size in EYE
+// (BUFFER at a small ANAGLYPH_BG_SEP offset, MID at ANAGLYPH_MID_SEP, FG at
+// the largest ANAGLYPH_FG_SEP so in-flight particles pop most toward the
+// viewer), then draw it onto the visible canvas through that eye's Dubois color
+// filter, additively blended with the other eye ('lighter' on the 2nd draw -
+// the 1st is a plain source-over reset of the frame). See DESIGN.md
+// "Anaglyph red/cyan mode".
+function drawEye(bx, by, mx, my, fx, fy, filter, compositeOp) {
   EYE_CTX.drawImage(BUFFER, bx, by, CAMERA_WIDTH, CAMERA_HEIGHT, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
+  EYE_CTX.drawImage(MID, mx, my, CAMERA_WIDTH, CAMERA_HEIGHT, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
   EYE_CTX.drawImage(FG, fx, fy, CAMERA_WIDTH, CAMERA_HEIGHT, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
   CTX.filter = filter;
   CTX.globalCompositeOperation = compositeOp;
@@ -1936,23 +1950,25 @@ function drawEye(bx, by, fx, fy, filter, compositeOp) {
 }
 function blitAnaglyph() {
   const bx = Math.floor(cameraX), by = cameraY;
-  drawEye(bx - ANAGLYPH_BG_SEP, by, bx - ANAGLYPH_FG_SEP, by, ANAGLYPH_FILTER_LEFT, 'source-over');
-  drawEye(bx + ANAGLYPH_BG_SEP, by, bx + ANAGLYPH_FG_SEP, by, ANAGLYPH_FILTER_RIGHT, 'lighter');
+  drawEye(bx - ANAGLYPH_BG_SEP, by, bx - ANAGLYPH_MID_SEP, by, bx - ANAGLYPH_FG_SEP, by, ANAGLYPH_FILTER_LEFT, 'source-over');
+  drawEye(bx + ANAGLYPH_BG_SEP, by, bx + ANAGLYPH_MID_SEP, by, bx + ANAGLYPH_FG_SEP, by, ANAGLYPH_FILTER_RIGHT, 'lighter');
 }
 
-// repaint the backbuffer from MAP, but only the camera slice (+ clear FG, the
-// animation layer's transient canvas, over the same slice) - nothing ever
-// reads BUFFER/FG outside it (blit/blitAnaglyph and renderDust all window to
-// the same rect). The buffer is 2x the viewport each way on every device, so
-// a full-buffer copy every frame would be ~4x wasted fill. The +ANAGLYPH_MARGIN
-// on each axis covers blitAnaglyph()'s shifted per-eye sampling (a plain
-// blit() only needs blit()'s own fractional-cameraX +1px, folded into the same
-// margin since it's already bigger); drawImage/clearRect clip the source read
-// at the buffer edge, so the slight overshoot at the far edges is harmless.
+// repaint the backbuffer from MAP, but only the camera slice (+ clear MID/FG,
+// the animation layer's transient canvases, over the same slice) - nothing
+// ever reads BUFFER/MID/FG outside it (blit/blitAnaglyph and renderDust all
+// window to the same rect). The buffer is 2x the viewport each way on every
+// device, so a full-buffer copy every frame would be ~4x wasted fill. The
+// +ANAGLYPH_MARGIN on each axis covers blitAnaglyph()'s shifted per-eye
+// sampling (a plain blit() only needs blit()'s own fractional-cameraX +1px,
+// folded into the same margin since it's already bigger); drawImage/clearRect
+// clip the source read at the buffer edge, so the slight overshoot at the far
+// edges is harmless.
 function clearBuffer() {
   const bx = Math.floor(cameraX) - ANAGLYPH_MARGIN, by = Math.floor(cameraY) - ANAGLYPH_MARGIN;
   const w = CAMERA_WIDTH + 1 + 2 * ANAGLYPH_MARGIN, h = CAMERA_HEIGHT + 1 + 2 * ANAGLYPH_MARGIN;
   BUFFER_CTX.drawImage(MAP, bx, by, w, h, bx, by, w, h);
+  MID_CTX.clearRect(bx, by, w, h);
   FG_CTX.clearRect(bx, by, w, h);
 }
 
@@ -2343,7 +2359,7 @@ const TAIL_WIGGLE_MAX = 15 * Math.PI / 180;   // tail swings this far each way o
 // feedback - flips the art top-to-bottom on top of that). The whole figure
 // corkscrews with the heading (climbing = upside down, by design).
 function drawHero(offsetX = 0, offsetY = 0, angle = hero.angle) {
-  const ctx = FG_CTX;
+  const ctx = MID_CTX;
   const s = DRILL_SCALE;
   ctx.save();
   ctx.translate(hero.x + hero.w / 2 + offsetX, hero.y + hero.h / 2 + offsetY);
@@ -2366,7 +2382,7 @@ function drawHero(offsetX = 0, offsetY = 0, angle = hero.angle) {
 // lag/whip between them). The hop is short enough the 0->JUMP_BEND snap at
 // takeoff isn't noticeable.
 function drawHeroJump(offsetX, offsetY, angle) {
-  const ctx = FG_CTX;
+  const ctx = MID_CTX;
   const s = DRILL_SCALE;
   const bend = JUMP_BEND;
   ctx.save();
@@ -2394,7 +2410,7 @@ function drawHeroJump(offsetX, offsetY, angle) {
 // dive even though this sprite doesn't corkscrew through headings like
 // drawHero's does.
 function drawUnicornSprite(offsetX = 0, offsetY = 0, angle = 0) {
-  const ctx = FG_CTX;
+  const ctx = MID_CTX;
   const w = SPRITE_SIZE * UNICORN_SCALE, h = SPRITE_SIZE * UNICORN_SCALE;
   ctx.save();
   ctx.translate(hero.x + hero.w / 2 + offsetX, hero.y + hero.h + offsetY);
@@ -2604,7 +2620,7 @@ function resizeViewport() {
   if (w === CAMERA_WIDTH && h === CAMERA_HEIGHT) return false;
   CAMERA_WIDTH = w;
   CAMERA_HEIGHT = h;
-  for (const buf of [BUFFER, FG, MAP, DUST_MASK]) {
+  for (const buf of [BUFFER, MID, FG, MAP, DUST_MASK]) {
     buf.width = 2 * CAMERA_WIDTH;
     buf.height = 2 * CAMERA_HEIGHT;
   }
@@ -2614,7 +2630,7 @@ function resizeViewport() {
   EYE.height = CAMERA_HEIGHT;
   DUST_PATTERN = DUST_LAYER_CTX.createPattern(DUST_GRADIENT, 'repeat');
   TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);
-  MAP_CTX.imageSmoothingEnabled = BUFFER_CTX.imageSmoothingEnabled = FG_CTX.imageSmoothingEnabled = DUST_MASK_CTX.imageSmoothingEnabled = DUST_LAYER_CTX.imageSmoothingEnabled = EYE_CTX.imageSmoothingEnabled = false;
+  MAP_CTX.imageSmoothingEnabled = BUFFER_CTX.imageSmoothingEnabled = MID_CTX.imageSmoothingEnabled = FG_CTX.imageSmoothingEnabled = DUST_MASK_CTX.imageSmoothingEnabled = DUST_LAYER_CTX.imageSmoothingEnabled = EYE_CTX.imageSmoothingEnabled = false;
   return true;
 }
 

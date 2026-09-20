@@ -443,44 +443,48 @@ noticeable.
 **Anaglyph red/cyan mode** (G toggles, any screen — same shape as the M mute
 toggle; no budget constraint post-competition, see TODO.md). The game has no
 real z-axis (it's a side-view drill shaft), so the 3D pop comes from fake
-depth — a horizontal parallax offset between two draw planes, sampled once
+depth — a horizontal parallax offset between three draw planes, sampled once
 per eye and additively recombined through a red/cyan color split.
 
 `BUFFER` used to be one flattened surface — `clearBuffer()` painted raw
 terrain into it, then `renderDust()`, `renderParticles()`, and `drawHero()`
 (plus `drawHeroJump()`/`drawUnicornSprite()`/`drawIris()`) all drew straight
-into `BUFFER_CTX` on top, merging background and foreground before `blit()`
-ever ran. It's now split into two buffer-space canvases of the same
-`2×CAMERA_WIDTH/HEIGHT` size:
-- `BUFFER` — terrain (`clearBuffer()`, unchanged) **plus dust colouring**
-  (`renderDust()`'s composite of `DUST_LAYER`). Dust stays background-plane
-  even though it's visually part of the "animation layer": it's masked to the
-  exact dug-tunnel shape baked into `BUFFER`'s terrain (including the
-  end-of-run rainbow flood, which fills that same shape), so it has to share
-  `BUFFER`'s parallax offset or it visibly detaches from the tunnel
-  silhouette — caught during tuning, where `ANAGLYPH_FG_SEP=10` made the
-  flood swim relative to the tunnel walls once it had been (wrongly) put on
-  `FG`.
-- `FG` — the free-floating sprites only: `renderParticles()`, `drawHero()`,
-  `drawHeroJump()`, `drawUnicornSprite()`, `drawIris()`. Nothing here is
-  shape-locked to the terrain, so they're free to pop toward the viewer.
-  Redirecting the target inside these shared functions covers every screen
-  branch (TITLE/GAME/REWIND/END) that calls them for free. `FG` gets a
-  per-frame clear (transparent, same cost class as `DUST_LAYER`'s) since it's
-  not accumulated like the paged `MAP`/`BUFFER`.
+into `BUFFER_CTX` on top, merging every depth before `blit()` ever ran. It's
+now split into three buffer-space canvases of the same `2×CAMERA_WIDTH/HEIGHT`
+size, far to near:
+- `BUFFER` (`ANAGLYPH_BG_SEP`, smallest) — terrain (`clearBuffer()`,
+  unchanged) **plus dust colouring** (`renderDust()`'s composite of
+  `DUST_LAYER`). Dust has to stay on this plane even though it's visually
+  part of the "animation layer": it's masked to the exact dug-tunnel shape
+  baked into `BUFFER`'s terrain (including the end-of-run rainbow flood,
+  which fills that same shape), so it must share `BUFFER`'s parallax offset
+  or it visibly detaches from the tunnel silhouette — caught during tuning,
+  where `ANAGLYPH_FG_SEP=10` made the flood swim relative to the tunnel walls
+  once it had briefly been (wrongly) put on the nearest plane.
+- `MID` (`ANAGLYPH_MID_SEP`) — `drawHero()`/`drawHeroJump()`/
+  `drawUnicornSprite()`/`drawIris()`. The characters.
+- `FG` (`ANAGLYPH_FG_SEP`, largest — pops most) — `renderParticles()`, the
+  in-flight dust-collection particles.
+None of these three is shape-locked to anything else, so their relative
+depth order is a feel choice, not a correctness constraint (unlike dust
+above) — tried hero+Iris nearest with particles at mid first, swapped to
+particles nearest + characters at mid, which read better. Redirecting the
+target inside these shared functions covers every screen branch
+(TITLE/GAME/REWIND/END) that calls them for free. `MID`/`FG` get a per-frame
+clear (transparent, same cost class as `DUST_LAYER`'s) since neither is
+accumulated like the paged `MAP`/`BUFFER`.
 
 `blit()` is the only place that changes behaviorally:
-- **normal mode**: draw `BUFFER` slice, then `FG` slice, then `TEXT` — same
-  pixels as before the split, offset 0 both times.
-- **anaglyph mode** (`blitAnaglyph()`): draw `BUFFER` shifted ±`ANAGLYPH_BG_SEP`
-  (small — background+dust barely move) and `FG` shifted ±`ANAGLYPH_FG_SEP`
-  (larger — particles+hero+Iris pop toward the viewer) into a scratch canvas
-  per eye (`EYE`), tinting each through a Dubois-matrix `feColorMatrix` filter
-  (inline `<svg>` in `index.html`, referenced via `ctx.filter = 'url(#...)'`)
-  and combining with `globalCompositeOperation = 'lighter'` (additive) on the
-  second eye. `TEXT` (HUD) draws last, unshifted and un-tinted — stereo HUD
-  text is illegible and gains nothing; a small "3D" label shows in the corner
-  instead (`renderHud()`) so the player knows the mode is on.
+- **normal mode**: draw `BUFFER` slice, then `MID` slice, then `FG` slice,
+  then `TEXT` — same pixels as before the split, offset 0 throughout.
+- **anaglyph mode** (`blitAnaglyph()`): draw all three planes at their own
+  ±`ANAGLYPH_*_SEP` offset into a scratch canvas per eye (`EYE`), tinting each
+  through a Dubois-matrix `feColorMatrix` filter (inline `<svg>` in
+  `index.html`, referenced via `ctx.filter = 'url(#...)'`) and combining with
+  `globalCompositeOperation = 'lighter'` (additive) on the second eye. `TEXT`
+  (HUD) draws last, unshifted and un-tinted — stereo HUD text is illegible
+  and gains nothing; a small "3D" label shows in the corner instead
+  (`renderHud()`) so the player knows the mode is on.
 
 Color split is Dubois half-color, not plain grayscale — the dust rainbow is
 the game's visual hook, and full desaturation would erase it. `feColorMatrix`
@@ -491,12 +495,12 @@ gamma-encoded input.
 
 `renderRainbow`/`renderDoubleRainbow` (END-screen bows, drawn via `arcBands`)
 stay on `BUFFER_CTX` (background plane, no pop) — not shape-locked to
-anything, just not worth the complexity of a third plane. `ANAGLYPH_BG_SEP=2`,
-`ANAGLYPH_FG_SEP=6` as shipped — playtested up to 10-12, which read as
-noticeably more "poppy" but started to hurt/ghost through actual glasses;
-6 was the last value that still felt comfortable. Re-tune both together if
-the feel needs revisiting, and re-check flood/tunnel alignment (above) if
-`ANAGLYPH_FG_SEP` ever moves independent of `ANAGLYPH_BG_SEP` by a lot.
+anything, just not worth a 4th plane. As shipped: `ANAGLYPH_BG_SEP=2`,
+`ANAGLYPH_MID_SEP=4`, `ANAGLYPH_FG_SEP=6` — playtested up to 10-12 on the
+nearest plane, which read as noticeably more "poppy" but started to hurt/
+ghost through actual glasses; 6 was the last value that still felt
+comfortable. Re-check flood/tunnel alignment (above) if `ANAGLYPH_FG_SEP` or
+`ANAGLYPH_MID_SEP` ever moves far from `ANAGLYPH_BG_SEP`.
 
 ## Screens
 

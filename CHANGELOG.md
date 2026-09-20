@@ -518,22 +518,24 @@ Roughly in build order, oldest first.
 
 - [x] Anaglyph red/cyan mode (post-competition "director's cut" — no 13 KB
       budget constraint). Split the previously flattened `BUFFER` backbuffer
-      into `BUFFER` (terrain + dust colouring) and `FG` (particles, hero,
-      Iris — the free-floating sprites), same buffer-space size, so `blit()`
-      can give them different horizontal parallax offsets. First pass put
-      dust on `FG` with everything else foreground-y; playtesting past
-      `ANAGLYPH_FG_SEP=6` (toward 10) showed the end-of-run rainbow flood
-      visibly detaching from the tunnel it fills, because that flood is
-      masked to the exact dug-tunnel shape baked into `BUFFER` — it has to
-      share `BUFFER`'s offset, not `FG`'s, or the color and the shape it's
-      supposed to fill drift apart. Moved dust back to `BUFFER`. `blitAnaglyph()`
-      composites each eye into a scratch `EYE` canvas, tints through a
-      Dubois-matrix `feColorMatrix` (inline `<svg>` in `index.html`,
-      `color-interpolation-filters="sRGB"` to avoid the default linearRGB
-      relinearizing a matrix meant for gamma-encoded input), additively
-      blends the two. Chose Dubois half-color over plain grayscale
+      into 3 buffer-space canvases so `blit()` can give each its own
+      horizontal parallax offset per eye: `BUFFER` (terrain + dust colouring),
+      `MID` (hero/Iris), `FG` (in-flight collection particles, nearest/most
+      pop). First pass put dust on the nearest plane with everything else;
+      playtesting past `ANAGLYPH_FG_SEP=6` (toward 10) showed the end-of-run
+      rainbow flood visibly detaching from the tunnel it fills, because that
+      flood is masked to the exact dug-tunnel shape baked into `BUFFER` — it
+      has to share `BUFFER`'s offset or the color and the shape it's supposed
+      to fill drift apart. Moved dust back to `BUFFER` for good. Also tried
+      hero+Iris on the nearest plane with particles at mid first; swapped
+      (particles nearest, characters at mid) after playtesting read better.
+      `blitAnaglyph()` composites each eye into a scratch `EYE` canvas, tints
+      through a Dubois-matrix `feColorMatrix` (inline `<svg>` in
+      `index.html`, `color-interpolation-filters="sRGB"` to avoid the default
+      linearRGB relinearizing a matrix meant for gamma-encoded input),
+      additively blends the two. Chose Dubois half-color over plain grayscale
       specifically to keep the dust rainbow visible through the glasses.
       G toggles it (any screen, same shape as M/mute); shipped at
-      `ANAGLYPH_BG_SEP=2`, `ANAGLYPH_FG_SEP=6` after playtesting higher
-      separations (10-12) felt like more pop but started to hurt/ghost
-      through real glasses.
+      `ANAGLYPH_BG_SEP=2`, `ANAGLYPH_MID_SEP=4`, `ANAGLYPH_FG_SEP=6` after
+      playtesting higher separations (10-12) felt like more pop but started
+      to hurt/ghost through real glasses.
